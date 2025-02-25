@@ -47,10 +47,19 @@ class AgentCreate(BaseModel):
     max_idle_time: Optional[int] = 300
     max_session_length: Optional[int] = 3600
 
+class UpdateWidget(BaseModel):
+    simliWidget:str
+
 class AgentResponse(BaseModel):
     id: str
     face_id: str
     name: str
+
+# Model for agents returned from the API (simplified for dropdown)
+class Agent(BaseModel):
+    id: str
+    name: str
+    previewImage:str
 
 # Session token request model
 class SessionTokenRequest(BaseModel):
@@ -76,24 +85,29 @@ async def get_faces():
                                 detail=f"Error fetching faces from Simli API: {response.text}")
         
         return response.json()
+@app.get("/test")
+async def testCode ():
+    return HTMLResponse(open("test.html").read())
 
-@app.post("/api/agent", response_model=AgentResponse, status_code=201)
-async def create_agent(agent: AgentCreate):
+@app.get("/api/agents", response_model=List[Agent])
+async def get_agents():
     """
-    Create a new agent with the Simli API
+    Fetch agent IDs from the Simli API
     """
-    # In a real implementation, you would forward this to the Simli API
-    # For now, we'll simulate a successful response
-    
-    # Validate that the face_id exists
-    # You might want to check this against the faces from the Simli API
-    
-    # Return a mock response
-    return AgentResponse(
-        id=f"agent-{agent.face_id[:8]}",
-        face_id=agent.face_id,
-        name=agent.name
-    )
+    async with httpx.AsyncClient() as client:
+        headers = {"x-simli-api-key": SIMLI_API_KEY}
+        response = await client.get("https://api.simli.ai/agents", headers=headers)
+        if response.status_code != 200:
+            print("AAAAAAAAAAA")
+            raise HTTPException(status_code=response.status_code, 
+                                detail=f"Error fetching agents from Simli API: {response.text}")
+        agents_data = response.json()
+        # Only include id and name for the dropdown
+        faces = {face["id"]:face for face in await get_faces()}
+        agents = [{"id": agent["id"], "name": agent.get("name", "Unnamed Agent"), "previewImage":faces[agent["face_id"]]["previewImage"]} for agent in agents_data]
+        return agents
+
+
 
 @app.post("/api/createE2ESessionToken", response_model=SessionTokenResponse)
 async def create_e2e_session_token(request: SessionTokenRequest):
@@ -117,6 +131,10 @@ async def create_e2e_session_token(request: SessionTokenRequest):
             )
         
         return response.json()
+@app.post("/api/updateTest")
+async def updateTestPage(widgetText:UpdateWidget):
+    with open("test.html", "w") as file:
+        file.write(f"<!DOCTYPE html>\n<body>{widgetText.simliWidget}\n</body>")
 
 # Serve HTML for frontend
 @app.get("/", response_class=HTMLResponse)
@@ -134,10 +152,9 @@ async def get_html():
                 padding: 20px;
                 background-color: #f9f9f9;
             }
-            h1 {
+            h1, h2, h3 {
                 color: #333;
                 text-align: center;
-                margin-bottom: 30px;
             }
             .container {
                 display: flex;
@@ -148,30 +165,24 @@ async def get_html():
                 display: flex;
                 gap: 20px;
             }
-            .left-column {
+            .left-column, .right-column {
                 flex: 1;
             }
-            .right-column {
-                flex: 1;
-            }
-            .selection-container, .form-container, .session-container {
+            .selection-container, .form-container, .session-container, .embed-container {
                 background-color: white;
                 border-radius: 8px;
                 padding: 20px;
                 box-shadow: 0 2px 4px rgba(0,0,0,0.1);
                 margin-bottom: 20px;
             }
-            
             .form-group {
                 margin-bottom: 15px;
             }
-            
             label {
                 display: block;
                 margin-bottom: 5px;
                 font-weight: bold;
             }
-            
             input, select, textarea {
                 width: 100%;
                 padding: 10px;
@@ -179,17 +190,14 @@ async def get_html():
                 border-radius: 4px;
                 font-size: 14px;
             }
-            
             textarea {
                 min-height: 80px;
                 resize: vertical;
             }
-            
             .required-field::after {
                 content: " *";
                 color: #c62828;
             }
-            
             .submit-button {
                 background-color: #4CAF50;
                 color: white;
@@ -200,7 +208,6 @@ async def get_html():
                 font-size: 16px;
                 margin-top: 15px;
             }
-            
             .success-container {
                 background-color: #e8f5e9;
                 border-left: 4px solid #4CAF50;
@@ -208,7 +215,6 @@ async def get_html():
                 margin-top: 20px;
                 border-radius: 4px;
             }
-            
             .agent-details, .token-details {
                 margin-top: 10px;
                 background-color: #f5f5f5;
@@ -216,13 +222,11 @@ async def get_html():
                 border-radius: 4px;
                 font-family: monospace;
             }
-            
             .agent-id, .token-value {
                 font-weight: bold;
                 color: #2e7d32;
                 word-break: break-all;
             }
-            
             .copy-button {
                 background-color: #2196F3;
                 color: white;
@@ -233,7 +237,6 @@ async def get_html():
                 font-size: 12px;
                 margin-left: 10px;
             }
-            
             .copy-button:hover {
                 background-color: #0b7dda;
             }
@@ -365,11 +368,6 @@ async def get_html():
                             </div>
                             
                             <div class="form-group">
-                                <label for="llm_endpoint">LLM Endpoint</label>
-                                <input type="text" id="llm_endpoint" name="llm_endpoint">
-                            </div>
-                            
-                            <div class="form-group">
                                 <label for="max_idle_time">Max Idle Time (seconds)</label>
                                 <input type="number" id="max_idle_time" name="max_idle_time" value="300">
                             </div>
@@ -440,6 +438,26 @@ async def get_html():
                     </div>
                 </div>
             </div>
+            
+            <!-- New Embed Code Generator Section -->
+            <div class="embed-container">
+                <h2>Embed Code Generator</h2>
+                <div class="form-group">
+                    <label for="agentSelect">Select Agent</label>
+                    <select id="agentSelect">
+                        <option value="" onclick="loadAgents()">Select an agent...</option>
+                    </select>
+                </div>
+                <button onclick="generateEmbedCode()" class="submit-button">Generate Embed Code</button>
+                <div id="embedCodeContainer" class="success-container" style="display: none;">
+                    <h3>Embed Code</h3>
+                    <textarea id="embedCode" readonly style="width:100%; height:120px;"></textarea>
+                    <button onclick="copyEmbedCode()" class="copy-button">Copy Embed Code</button>
+                    <button onclick="updateTestPage()" class="copy-button">Update Test Page</button>
+                </div>
+                <button onclick="window.location.href  = '/test';" class="submit-button">Go To test</button>
+            </div>
+            
         </div>
 
         <script>
@@ -447,7 +465,7 @@ async def get_html():
             let faces = [];
             let selectedFaceId = '';
             
-            // API endpoint for agent creation
+            // API endpoints
             const CREATE_AGENT_ENDPOINT = "https://api.simli.ai/agent";
             
             // DOM Elements
@@ -469,8 +487,11 @@ async def get_html():
             const tokenSuccessContainer = document.getElementById('tokenSuccessContainer');
             const createdToken = document.getElementById('createdToken');
             
-            // Load faces on page load
-            document.addEventListener('DOMContentLoaded', loadFaces);
+            // Load faces and agents on page load
+            document.addEventListener('DOMContentLoaded', () => {
+                loadFaces();
+                loadAgents();
+            });
             
             // Add form submission handlers
             agentForm.addEventListener('submit', submitAgentForm);
@@ -528,7 +549,7 @@ async def get_html():
                     card.onclick = () => selectFace(face.id);
                     
                     card.innerHTML = `
-                        <img src="${face.previewImage}" alt="${face.name}" class="face-image" onerror="this.src='https://via.placeholder.com/300x200?text=Image+Not+Available'">
+                        <img src="${face.previewImage}" alt="${face.name}" class="face-image">
                         <div class="face-info">
                             <div class="face-name">${face.name}</div>
                             <div class="face-id">${face.id}</div>
@@ -566,9 +587,9 @@ async def get_html():
                     videoPreview.style.display = 'block';
                     
                     // Automatically scroll to video preview
-                    setTimeout(() => {
-                        videoPreview.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }, 100);
+                    //setTimeout(() => {
+                    //     videoPreview.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    //}, 100);
                 } else {
                     videoPreview.style.display = 'none';
                 }
@@ -640,8 +661,8 @@ async def get_html():
                     successContainer.style.display = 'block';
                     
                     // Scroll to success message
+                    await loadAgents();
                     successContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    
                 } catch (error) {
                     console.error('Error creating agent:', error);
                     showError(`Failed to create agent: ${error.message}`);
@@ -678,7 +699,6 @@ async def get_html():
                     }
                     
                     const result = await response.json();
-                    console.log(result);
                     // Display success message with token
                     createdToken.textContent = result.session_token;
                     tokenSuccessContainer.style.display = 'block';
@@ -692,6 +712,69 @@ async def get_html():
                 }
             }
             
+            async function loadAgents() {
+                try {
+                    const response = await fetch('/api/agents');
+                    if (!response.ok) {
+                        throw new Error(`API error: ${response.status} ${response.statusText}`);
+                    }
+                    const agents = await response.json();
+                    const agentSelect = document.getElementById('agentSelect');
+                    agentSelect.innerHTML = '<option value="">Select an agent...</option>';
+                    agents.forEach(agent => {
+                        const option = document.createElement('option');
+                        option.value = JSON.stringify( {id:agent.id, previewImage:agent.previewImage});
+                        option.textContent = agent.name + ' (' + agent.id + ')';
+                        agentSelect.appendChild(option);
+                    });
+                } catch (error) {
+                    console.error('Error loading agents:', error);
+                }
+            }
+            
+            function generateEmbedCode() {
+                const agentSelect = document.getElementById('agentSelect');
+                const selectedAgentId = JSON.parse( agentSelect.value);
+                console.log(selectedAgentId.id);
+                if (!selectedAgentId) {
+                    alert('Please select an agent');
+                    return;
+                }
+                // Get session token from the created token element
+                const token = document.getElementById('createdToken').textContent;
+                if (!token) {
+                    alert('Please create an E2E session token first.');
+                    return;
+                }
+                // Create embed code snippet
+                const embedCode = `<simli-widget token="${token}" agentid="${selectedAgentId.id}" position="right" customimage="${selectedAgentId.previewImage}" customtext="Call assistant" >
+                </simli-widget>
+<script src="https://websimli-frontend-git-dev-simli.vercel.app/simli-widget/index.js" async type="text/javascript"><\/script>`;
+                const embedCodeContainer = document.getElementById('embedCodeContainer');
+                document.getElementById('embedCode').value = embedCode;
+                embedCodeContainer.style.display = 'block';
+            }
+            
+            function copyEmbedCode() {
+                const embedCode = document.getElementById('embedCode').value;
+                navigator.clipboard.writeText(embedCode)
+                    .then(() => {
+                        alert('Embed code copied to clipboard!');
+                    })
+                    .catch(err => {
+                        console.error('Could not copy embed code: ', err);
+                    });
+            }
+            async function updateTestPage(){
+                const embedCode = document.getElementById('embedCode').value;
+                await fetch ("/api/updateTest",{
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({simliWidget:embedCode})
+                    })
+            }
             function copyAgentId() {
                 const agentId = createdAgentId.textContent;
                 navigator.clipboard.writeText(agentId)
