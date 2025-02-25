@@ -1,4 +1,3 @@
-# main.py
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -14,11 +13,17 @@ load_dotenv()
 
 app = FastAPI(title="Simli Face Selection API")
 
-# Get API key from environment variable
+# Get API keys from environment variables
 SIMLI_API_KEY = os.getenv("SIMLI_API_KEY")
+TTS_API_KEY = os.getenv("TTS_API_KEY")
+
 if not SIMLI_API_KEY:
     print("Warning: SIMLI_API_KEY not found in environment variables. Using default value for testing.")
     SIMLI_API_KEY = "YOUR_API_KEY_HERE"  # Replace with your actual API key for testing
+
+if not TTS_API_KEY:
+    print("Warning: TTS_API_KEY not found in environment variables. Using default value for testing.")
+    TTS_API_KEY = "YOUR_TTS_API_KEY_HERE"  # Replace with your actual TTS API key for testing
 
 # Model for our face options
 class FaceOption(BaseModel):
@@ -46,6 +51,15 @@ class AgentResponse(BaseModel):
     id: str
     face_id: str
     name: str
+
+# Session token request model
+class SessionTokenRequest(BaseModel):
+    simliAPIKey: str
+    ttsAPIKey: str
+
+# Session token response model
+class SessionTokenResponse(BaseModel):
+    session_token: str
 
 # API routes
 @app.get("/api/faces", response_model=List[FaceOption])
@@ -80,6 +94,29 @@ async def create_agent(agent: AgentCreate):
         face_id=agent.face_id,
         name=agent.name
     )
+
+@app.post("/api/createE2ESessionToken", response_model=SessionTokenResponse)
+async def create_e2e_session_token(request: SessionTokenRequest):
+    """
+    Create a new end-to-end session token
+    """
+    # In a real implementation, you would forward this to the endpoint
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.simli.ai/createE2ESessionToken",
+            json={
+                "simliAPIKey": request.simliAPIKey,
+                "ttsAPIKey": request.ttsAPIKey
+            }
+        )
+        
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code, 
+                detail=f"Error creating session token: {response.text}"
+            )
+        
+        return response.json()
 
 # Serve HTML for frontend
 @app.get("/", response_class=HTMLResponse)
@@ -117,7 +154,7 @@ async def get_html():
             .right-column {
                 flex: 1;
             }
-            .selection-container, .form-container {
+            .selection-container, .form-container, .session-container {
                 background-color: white;
                 border-radius: 8px;
                 padding: 20px;
@@ -172,7 +209,7 @@ async def get_html():
                 border-radius: 4px;
             }
             
-            .agent-details {
+            .agent-details, .token-details {
                 margin-top: 10px;
                 background-color: #f5f5f5;
                 padding: 15px;
@@ -180,9 +217,10 @@ async def get_html():
                 font-family: monospace;
             }
             
-            .agent-id {
+            .agent-id, .token-value {
                 font-weight: bold;
                 color: #2e7d32;
+                word-break: break-all;
             }
             
             .copy-button {
@@ -375,6 +413,33 @@ async def get_html():
                 <h2>Video Preview</h2>
                 <video id="videoPlayer" controls autoplay loop muted></video>
             </div>
+            
+            <!-- New session token section -->
+            <div class="session-container">
+                <h2>Create E2E Session Token</h2>
+                <form id="sessionTokenForm">
+                    <div class="form-group">
+                        <label for="simliAPIKey">Simli API Key</label>
+                        <input type="text" id="simliAPIKey" name="simliAPIKey" value="SIMLI_API_KEY">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="ttsAPIKey">TTS API Key</label>
+                        <input type="text" id="ttsAPIKey" name="ttsAPIKey" value="TTS_API_KEY">
+                    </div>
+                    
+                    <button type="submit" class="submit-button">Create Session Token</button>
+                </form>
+                
+                <div id="tokenSuccessContainer" class="success-container" style="display: none;">
+                    <h3>Session Token Created Successfully!</h3>
+                    <div id="tokenDetails" class="token-details">
+                        <div>Token: <span id="createdToken" class="token-value"></span> 
+                            <button onclick="copyToken()" class="copy-button">Copy Token</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <script>
@@ -399,11 +464,17 @@ async def get_html():
             const createdAgentFaceId = document.getElementById('createdAgentFaceId');
             const createdAgentId = document.getElementById('createdAgentId');
             
+            // Session token elements
+            const sessionTokenForm = document.getElementById('sessionTokenForm');
+            const tokenSuccessContainer = document.getElementById('tokenSuccessContainer');
+            const createdToken = document.getElementById('createdToken');
+            
             // Load faces on page load
             document.addEventListener('DOMContentLoaded', loadFaces);
             
-            // Add form submission handler
+            // Add form submission handlers
             agentForm.addEventListener('submit', submitAgentForm);
+            sessionTokenForm.addEventListener('submit', submitSessionTokenForm);
             
             // Functions to interact with the API
             async function loadFaces() {
@@ -577,6 +648,50 @@ async def get_html():
                 }
             }
             
+            async function submitSessionTokenForm(e) {
+                e.preventDefault();
+                
+                // Hide token success message if shown previously
+                tokenSuccessContainer.style.display = 'none';
+                
+                // Get form data
+                const formData = new FormData(sessionTokenForm);
+                const tokenData = {};
+                
+                // Convert FormData to JSON object
+                for (const [key, value] of formData.entries()) {
+                    tokenData[key] = value;
+                }
+                
+                try {
+                    const response = await fetch('/api/createE2ESessionToken', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(tokenData)
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || 'Failed to create session token');
+                    }
+                    
+                    const result = await response.json();
+                    console.log(result);
+                    // Display success message with token
+                    createdToken.textContent = result.session_token;
+                    tokenSuccessContainer.style.display = 'block';
+                    
+                    // Scroll to token success message
+                    tokenSuccessContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    
+                } catch (error) {
+                    console.error('Error creating session token:', error);
+                    showError(`Failed to create session token: ${error.message}`);
+                }
+            }
+            
             function copyAgentId() {
                 const agentId = createdAgentId.textContent;
                 navigator.clipboard.writeText(agentId)
@@ -587,10 +702,21 @@ async def get_html():
                         console.error('Could not copy text: ', err);
                     });
             }
+            
+            function copyToken() {
+                const token = createdToken.textContent;
+                navigator.clipboard.writeText(token)
+                    .then(() => {
+                        alert('Session token copied to clipboard!');
+                    })
+                    .catch(err => {
+                        console.error('Could not copy text: ', err);
+                    });
+            }
         </script>
     </body>
     </html>
-    """.replace("SIMLI_API_KEY", SIMLI_API_KEY)
+    """.replace("SIMLI_API_KEY", SIMLI_API_KEY).replace("TTS_API_KEY", TTS_API_KEY)
 
 if __name__ == "__main__":
     import uvicorn
