@@ -98,7 +98,6 @@ async def get_agents():
         headers = {"x-simli-api-key": SIMLI_API_KEY}
         response = await client.get("https://api.simli.ai/agents", headers=headers)
         if response.status_code != 200:
-            print("AAAAAAAAAAA")
             raise HTTPException(status_code=response.status_code, 
                                 detail=f"Error fetching agents from Simli API: {response.text}")
         agents_data = response.json()
@@ -551,7 +550,6 @@ async def get_html():
                     card.innerHTML = `
                         <img src="${face.previewImage}" alt="${face.name}" class="face-image">
                         <div class="face-info">
-                            <div class="face-name">${face.name}</div>
                             <div class="face-id">${face.id}</div>
                         </div>
                     `;
